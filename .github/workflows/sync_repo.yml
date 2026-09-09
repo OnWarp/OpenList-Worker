@@ -8,6 +8,7 @@ on:
 
 jobs:
   sync:
+    if: github.repository == 'OpenListTeam/OpenList-Worker'
     runs-on: ubuntu-latest
     name: Sync Repository
     steps:
