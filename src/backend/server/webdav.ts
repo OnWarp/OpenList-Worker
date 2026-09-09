@@ -86,7 +86,25 @@ function splitPath(p: string): { dir: string; name: string } {
   return { dir, name }
 }
 
-webdavRouter.all("/*", async (c) => {
+function davOptions(c: any) {
+  c.header("DAV", "1, 2")
+  c.header(
+    "Allow",
+    "OPTIONS, PROPFIND, GET, HEAD, PUT, MKCOL, DELETE, MOVE, COPY",
+  )
+  c.header("MS-Author-Via", "DAV")
+  return c.body(null, 200)
+}
+
+webdavRouter.options("/", davOptions)
+webdavRouter.options("/*", davOptions)
+
+webdavRouter.all("/", davHandler)
+webdavRouter.all("/*", davHandler)
+
+async function davHandler(c: any) {
+  if (c.req.method.toUpperCase() === "OPTIONS") return davOptions(c)
+
   const user = await webdavAuth(c)
   if (!user) {
     return c.text("Unauthorized", 401, {
@@ -201,4 +219,4 @@ webdavRouter.all("/*", async (c) => {
     }
     return c.text(msg, 500)
   }
-})
+}
