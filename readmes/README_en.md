@@ -37,15 +37,15 @@ Click the button below to deploy this project to the corresponding platform with
 
 | EdgeOne Makers · International | EdgeOne Makers · China | Cloudflare Workers · Global |
 | :---: | :---: | :---: |
-| [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
+| [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
 
 </div>
 
 > [!IMPORTANT]
 > - If Cloudflare prompts `cannot fetch repository content`, [Fork](https://github.com/OpenListTeam/OpenList-Worker/fork) this project first, then deploy by connecting to the GitHub repository
 > - After deployment, configure environment variables: **EdgeOne**: [International console](https://console.edgeone.ai/makers) · [China console](https://console.cloud.tencent.com/edgeone/makers); **Cloudflare**: [Worker dashboard](https://dash.cloudflare.com/). Environment variables:
->   - `DB_DRIVER`: data backend: `json` (default) / `d1` (Cloudflare) / `kv` / `mysql`
->   - `DB_JSON_BACKEND`: backend used by the `json` format: `blob` (default) / `kv` / `cf_rest`
+>   - `DB_FORMAT`: data storage format: `map` (default, whole object JSON) / `key` (per-key storage) / `sql` (relational tables, compatible with Go backend)
+>   - `DB_DRIVER`: database driver: `auto` (default, auto-detect) / `blob` (EdgeOne Blob) / `cfkv` (CF KV API) / `kv` (KV binding) / `d1` (Cloudflare D1) / `mysql`
 >   - For other optional variables, see the **detailed deployment guide**: [Cloudflare](https://doc.oplist.org/guide/installation/worker#deploy-to-cloudflare-workers) · [EdgeOne](https://doc.oplist.org/guide/installation/worker#deploy-to-edgeone) · [ESA](https://doc.oplist.org/guide/installation/worker#deploy-to-alibaba-cloud-esa)
 
 
@@ -144,6 +144,85 @@ pnpm run deploy:worker
 - **Framework**: React 19 + TypeScript
 - **UI libraries**: Ant Design / Material-UI
 - **Build tool**: Vite
+
+---
+
+
+## Configuration
+
+### Environment Variables
+
+#### Database Configuration
+
+**DB_FORMAT** (Data Storage Format)
+- `map` (default): Whole object JSON format, suitable for KV/Blob simple storage
+- `key`: Per-key storage format, each entity as a separate record (e.g., `users_1`), avoids large JSON
+- `sql`: Relational database table format, fully compatible with Go backend, suitable for D1/MySQL
+
+**DB_DRIVER** (Database Driver)
+- `auto` (default): Auto-detect available drivers (priority: mysql → d1 → kv → cfkv → blob → do)
+- `blob`: Tencent EdgeOne Blob / Alibaba ESA Blob
+- `cfkv`: Cloudflare KV REST API (requires `CF_ACCOUNT`, `CF_KV_UUID`, `CF_API_KEY`)
+- `kv`: Cloudflare KV binding (binding name is fixed to `KV`)
+- `d1`: Cloudflare D1 (SQLite)
+- `do`: Cloudflare Durable Objects (SQLite)
+- `mysql`: MySQL (Node.js container only)
+
+**Recommended Configurations:**
+```bash
+# Cloudflare Workers + D1 (recommended)
+DB_FORMAT=sql
+DB_DRIVER=d1
+
+# EdgeOne + Blob
+DB_FORMAT=map
+DB_DRIVER=blob
+
+# Cloudflare KV (high-frequency read/write)
+DB_FORMAT=key
+DB_DRIVER=kv
+
+# Remote Cloudflare KV access
+DB_FORMAT=key
+DB_DRIVER=cfkv
+CF_ACCOUNT=your_account_id
+CF_KV_UUID=your_namespace_id
+CF_API_KEY=your_api_token
+```
+
+> An explicitly configured driver is **never replaced automatically**. If it is
+> unavailable the request is rejected with an actionable reason (including which
+> driver auto-detection would have picked); `/api/public/env_check` and
+> `/api/public/init_status` report the same reason plus a one-line fix. This
+> prevents "I thought it was KV, but writes went to another backend".
+> Invalid driver/format pairs (e.g. `DB_FORMAT=sql` + `DB_DRIVER=kv`) are
+> reported the same way — the app never rewrites your configuration.
+
+**Backward Compatibility:**
+- `DB_DRIVER=json` auto-converts to `DB_FORMAT=map` + auto-detect driver
+
+**Table Naming (SQL format only):**
+The `sql` format uses columnar tables with the same naming strategy as the Go backend's GORM (snake_case + pluralized names + prefix):
+
+| Go struct     | Table name         |
+| :------------ | :----------------- |
+| `SettingItem` | `x_setting_items`  |
+| `SharingDB`   | `x_sharing_dbs`    |
+| `Storage`     | `x_storages`       |
+| `User`        | `x_users`          |
+| `Meta`        | `x_metas`          |
+| (TS only)     | `x_plugins`        |
+
+The prefix is fixed to `x_` (matching the Go backend default), so no extra configuration is needed to share the same physical database with the Go backend.
+
+#### Security Configuration
+
+- `JWT_SECRET`: JWT signing key (required), also used for data encryption and cron task authentication
+- `ADMIN_PASS`: Initial admin password (optional, skips the setup wizard and auto-initializes admin)
+
+#### Other Configuration
+
+For detailed configuration, please refer to the [official documentation](https://doc.oplist.org/guide/configuration)
 
 ---
 

@@ -37,15 +37,15 @@ Klicken Sie auf die Schaltfläche unten, um dieses Projekt mit einem Klick auf d
 
 | EdgeOne Makers · International | EdgeOne Makers · China | Cloudflare Workers · Global |
 | :---: | :---: | :---: |
-| [![Auf EdgeOne bereitstellen](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Auf EdgeOne bereitstellen](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
+| [![Auf EdgeOne bereitstellen](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Auf EdgeOne bereitstellen](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
 
 </div>
 
 > [!IMPORTANT]
 > - Wenn Cloudflare `Repository-Inhalt kann nicht abgerufen werden` anzeigt, [forken](https://github.com/OpenListTeam/OpenList-Worker/fork) Sie dieses Projekt zuerst und stellen Sie es dann über die Verbindung zum Github-Repository bereit
 > - Konfigurieren Sie nach der Bereitstellung die Umgebungsvariablen: **EdgeOne**: [Internationale Konsole](https://console.edgeone.ai/makers) · [China-Konsole](https://console.cloud.tencent.com/edgeone/makers); **Cloudflare**: [Worker-Dashboard](https://dash.cloudflare.com/). Umgebungsvariablen:
->   - `DB_DRIVER`: Datenspeichermodus: `json` (Standard) / `d1` (Cloudflare) / `kv` / `mysql`
->   - `DB_JSON_BACKEND`: Backend für das `json`-Format: `blob` (Standard) / `kv` / `cf_rest`
+>   - `DB_FORMAT`: Datenspeicherformat: `map` (Standard, JSON des gesamten Objekts) / `key` (schlüsselbasierte Speicherung) / `sql` (relationale Tabellen, kompatibel mit dem Go-Backend)
+>   - `DB_DRIVER`: Datenbanktreiber: `auto` (Standard, automatische Erkennung) / `blob` / `cfkv` / `kv` / `d1` / `mysql`
 >   - Weitere optionale Variablen finden Sie im **detaillierten Bereitstellungsleitfaden**: [Cloudflare](https://doc.oplist.org/guide/installation/worker#deploy-to-cloudflare-workers) · [EdgeOne](https://doc.oplist.org/guide/installation/worker#deploy-to-edgeone) · [ESA](https://doc.oplist.org/guide/installation/worker#deploy-to-alibaba-cloud-esa)
 
 

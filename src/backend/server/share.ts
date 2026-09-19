@@ -23,17 +23,14 @@ shareRouter.use("/cancel", adminAuthMiddleware)
 shareRouter.use("/enable", adminAuthMiddleware)
 shareRouter.use("/disable", adminAuthMiddleware)
 
-// List all shares (sanitizes plain password field)
+// List all shares (returns full data aligned with Go backend)
 shareRouter.get("/list", async (c) => {
   const db = await getDb(c.env)
-  const sanitizedShares = (db.shares || []).map((s: any) => ({
-    ...s,
-    pwd: s.pwd ? "******" : "",
-  }))
+  const shares = db.shares || []
   return c.json({
     code: 200,
     message: "success",
-    data: { content: sanitizedShares, total: sanitizedShares.length },
+    data: { content: shares, total: shares.length },
   })
 })
 
@@ -109,9 +106,12 @@ shareRouter.post("/create", async (c) => {
   const newShare = {
     id: shareId,
     new_id: body.new_id || shareId,
-    creator: user.username || "user",
-    creator_role: user.role ?? 1,
-    accessed: 0,
+    // 对齐 Go CreateSharing：管理员恢复分享时可通过 creator/creator_role 字段
+    // 保留原创建者，否则默认当前登录用户。
+    creator: body.creator || user.username || "user",
+    creator_role:
+      body.creator_role !== undefined ? body.creator_role : (user.role ?? 1),
+    accessed: body.accessed ?? 0,
     expires: body.expires || null,
     pwd: body.pwd || "",
     max_accessed: body.max_accessed ?? 0,

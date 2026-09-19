@@ -21,7 +21,6 @@ import {
   deleteUserSshKey,
 } from "../internal/op/sshkey"
 import {
-  verifyPassword,
   staticHash,
   saltedHash,
   generateSalt,
@@ -258,7 +257,6 @@ export async function verifyUserStaticHash(
 
 /**
  * 校验明文密码（/login、改密旧密码校验、WebDAV Basic Auth 共用）。
- * 对 bcrypt 遗留记录仍可逃生（验证通过后由调用方迁移）。
  */
 export async function verifyUserPassword(
   user: any,
@@ -266,9 +264,6 @@ export async function verifyUserPassword(
 ): Promise<boolean> {
   const stored = String(user?.password || "").trim()
   if (!stored) return false
-  if (/^\$2[aby]\$/.test(stored)) {
-    return verifyPassword(plain, stored)
-  }
   return verifyUserStaticHash(user, await staticHash(plain))
 }
 
@@ -302,8 +297,8 @@ export async function getOrInitUsers(envCtx: any) {
   const db = await getDb(envCtx)
   if (!db.users || db.users.length === 0) {
     const envPass =
-      (envCtx && envCtx.ADMIN_PASSWORD) ||
-      (typeof process !== "undefined" ? process.env?.ADMIN_PASSWORD : "") ||
+      (envCtx && envCtx.ADMIN_PASS) ||
+      (typeof process !== "undefined" ? process.env?.ADMIN_PASS : "") ||
       ""
     const guest = {
       id: 2,
@@ -318,7 +313,7 @@ export async function getOrInitUsers(envCtx: any) {
       pwd_update_at: new Date().toISOString(),
     }
     if (envPass) {
-      // 显式配置了 ADMIN_PASSWORD：自动初始化 admin（保持兼容）
+      // 显式配置了 ADMIN_PASS：自动初始化 admin（保持兼容）
       const admin: any = {
         id: 1,
         username: "admin",
@@ -332,18 +327,32 @@ export async function getOrInitUsers(envCtx: any) {
         pwd_update_at: new Date().toISOString(),
       }
       await setUserPassword(admin, envPass)
+      // 自愈：数据库中完全没有用户时补回 admin/guest 占位用户。
+      //
+      // 注意：这里构建出的库在「尚无密码、也无其它实体」时会被 saveDb 的写前守卫
+      // 判定为空壳。只有在当前库可信（曾成功读取过真实配置）时才允许强制落盘，
+      // 否则宁可拒绝写入，也不要让「读取失败后的空库」被误当成已完成初始化。
       db.users = [admin, guest]
     } else {
       // 未初始化：仅创建 guest，admin 由 Web 安装向导（POST /api/public/init/setup）创建
       db.users = [guest]
     }
-    await saveDb(db, envCtx)
+    // 只有配置了 ADMIN_PASS（或已存在真实管理员）时，这份库才不是空壳，
+    // 才应该落盘。未配置时应等待 init/setup 完成初始化，而不是抢先写入一个
+    // 未初始化的占位库（会被 saveDb 的写前守卫拦截）。
+    const persisted = await saveDb(db, envCtx)
+    if (!persisted) {
+      console.warn(
+        "[Auth] getOrInitUsers: skipped persisting an uninitialized placeholder DB " +
+          "(expected until POST /api/public/init/setup completes).",
+      )
+    }
   } else {
     const adminUser = db.users.find((u: any) => u.role === 2)
     // FIX(F-11): the old logic silently reset any non-64-hex password (e.g. a
     // legacy PBKDF2 hash) back to admin/admin — meaning a routine upgrade
     // could quietly reopen the admin account to the world. New behavior:
-    //   ADMIN_PASSWORD set -> explicit reset to that value (operator intent)
+    //   ADMIN_PASS set     -> explicit reset to that value (operator intent)
     //   password empty    -> random password, printed once to the log
     //   legacy-format     -> LEFT UNTOUCHED, only a warning is logged, so an
     //                        existing deployment is never locked out nor
@@ -352,8 +361,8 @@ export async function getOrInitUsers(envCtx: any) {
     const isValidFormat = /^[0-9a-f]{64}$/i.test(adminPass)
     if (adminUser && !isValidFormat) {
       const envPass =
-        (envCtx && envCtx.ADMIN_PASSWORD) ||
-        (typeof process !== "undefined" ? process.env?.ADMIN_PASSWORD : "") ||
+        (envCtx && envCtx.ADMIN_PASS) ||
+        (typeof process !== "undefined" ? process.env?.ADMIN_PASS : "") ||
         ""
       if (envPass) {
         await setUserPassword(adminUser, envPass)
@@ -362,14 +371,14 @@ export async function getOrInitUsers(envCtx: any) {
         // 未初始化：不再自动生成随机密码，交由 Web 安装向导（POST /api/public/init/setup）完成。
         // 前端会在 /api/public/init_status 返回未初始化时自动跳转到安装向导。
         console.warn(
-          "[SECURITY] Admin password is empty and no ADMIN_PASSWORD is set — the system is NOT initialized. " +
-            "Open the site in a browser to run the setup wizard, or set ADMIN_PASSWORD to initialize automatically.",
+          "[SECURITY] Admin password is empty and no ADMIN_PASS is set — the system is NOT initialized. " +
+            "Open the site in a browser to run the setup wizard, or set ADMIN_PASS to initialize automatically.",
         )
       } else {
         console.warn(
           "[SECURITY] Admin password uses a legacy hash format this build cannot verify; " +
             "it has been left untouched. Log in with your existing password and re-set it, " +
-            "or set ADMIN_PASSWORD to force a reset. It will NOT be reset to a default value.",
+            "or set ADMIN_PASS to force a reset. It will NOT be reset to a default value.",
         )
       }
     }

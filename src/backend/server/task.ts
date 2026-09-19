@@ -8,7 +8,7 @@ export const taskRouter = new Hono()
 // 定时任务调度接口：刷新所有已启用网盘驱动的 Token / 状态并持久化
 // 仅管理员可触发（防止未授权用户探测存储配置/触发资源消耗）。
 // EdgeOne Schedules 等平台调度器无法附加 Authorization 头，
-// 因此在设置环境变量 CRON_SECRET 后，调度请求可携带该密钥
+// 因此复用 JWT_SECRET 作为调度密钥，调度请求可携带该密钥
 //（JSON body / query / X-Cron-Secret 头）通过 matchCronSecret 放行。
 taskRouter.all(
   "/refresh",
@@ -133,30 +133,25 @@ taskRouter.post("/:type/clear_succeeded", (c) => {
   return c.json({ code: 200, message: "success", data: null })
 })
 
-taskRouter.post("/:type/retry_failed", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
+// 以下接口在 TS Worker 中无意义：TS 不维护持久异步任务队列，
+// 所有文件操作均同步完成后立即返回。任务 ID / 进度 / 重试 / 取消
+// 等生命周期管理由 Go 后端负责，此处明确返回 501。
+const unsupportedTaskOp = (c: any) =>
+  c.json(
+    {
+      code: 501,
+      message:
+        "task lifecycle operations (retry/cancel/delete) are not supported in the TS Worker runtime; " +
+        "file operations execute synchronously and do not produce persistent tasks",
+      data: null,
+    },
+    501,
+  )
 
-taskRouter.post("/:type/retry", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
-
-taskRouter.post("/:type/retry_some", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
-
-taskRouter.post("/:type/cancel", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
-
-taskRouter.post("/:type/cancel_some", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
-
-taskRouter.post("/:type/delete", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
-
-taskRouter.post("/:type/delete_some", (c) => {
-  return c.json({ code: 200, message: "success", data: null })
-})
+taskRouter.post("/:type/retry_failed", unsupportedTaskOp)
+taskRouter.post("/:type/retry", unsupportedTaskOp)
+taskRouter.post("/:type/retry_some", unsupportedTaskOp)
+taskRouter.post("/:type/cancel", unsupportedTaskOp)
+taskRouter.post("/:type/cancel_some", unsupportedTaskOp)
+taskRouter.post("/:type/delete", unsupportedTaskOp)
+taskRouter.post("/:type/delete_some", unsupportedTaskOp)

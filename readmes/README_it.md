@@ -37,15 +37,15 @@ Clicca il pulsante qui sotto per distribuire questo progetto sulla piattaforma c
 
 | EdgeOne Makers · Internazionale | EdgeOne Makers · Cina | Cloudflare Workers · Globale |
 | :---: | :---: | :---: |
-| [![Deploy su EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy su EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
+| [![Deploy su EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy su EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
 
 </div>
 
 > [!IMPORTANT]
 > - Se Cloudflare mostra `impossibile recuperare il contenuto del repository`, [fai un fork](https://github.com/OpenListTeam/OpenList-Worker/fork) di questo progetto e poi distribuisci collegandoti al repository Github
 > - Dopo il deploy, configura le variabili d'ambiente: **EdgeOne**: [Console internazionale](https://console.edgeone.ai/makers) · [Console Cina](https://console.cloud.tencent.com/edgeone/makers); **Cloudflare**: [Dashboard Worker](https://dash.cloudflare.com/). Variabili d'ambiente:
->   - `DB_DRIVER`: modalità di salvataggio dei dati: `json` (predefinito) / `d1` (Cloudflare) / `kv` / `mysql`
->   - `DB_JSON_BACKEND`: backend utilizzato dal formato `json`: `blob` (predefinito) / `kv` / `cf_rest`
+>   - `DB_FORMAT`: formato di archiviazione dei dati: `map` (predefinito, JSON dell'oggetto completo) / `key` (archiviazione per chiave) / `sql` (tabelle relazionali, compatibile con il backend Go)
+>   - `DB_DRIVER`: driver del database: `auto` (predefinito, rilevamento automatico) / `blob` / `cfkv` / `kv` / `d1` / `mysql`
 >   - Per le altre variabili opzionali, consulta la **guida di deploy dettagliata**: [Cloudflare](https://doc.oplist.org/guide/installation/worker#deploy-to-cloudflare-workers) · [EdgeOne](https://doc.oplist.org/guide/installation/worker#deploy-to-edgeone) · [ESA](https://doc.oplist.org/guide/installation/worker#deploy-to-alibaba-cloud-esa)
 
 

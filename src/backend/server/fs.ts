@@ -16,6 +16,16 @@ import { resolvePath } from "../internal/model/db"
 import { getUserFromContext } from "./middlewares"
 import { canWrite, getActualPath, isAdmin } from "../pkg/permission"
 import {
+  getNearestMeta,
+  canAccess,
+  getReadme,
+  getHeader,
+  canWriteContentBypassUserPerms,
+  isHidden,
+  canWrite as canWriteMeta,
+} from "../pkg/meta"
+import type { Meta } from "../pkg/meta"
+import {
   getSignPolicy,
   signDownloadPath,
   isEncryptPath,
@@ -23,9 +33,27 @@ import {
 } from "../pkg/sign"
 import { safeErrorMessage } from "../pkg/errs"
 import { search } from "../internal/op/search"
+import {
+  getDisableIndex,
+  resolveCacheExpiration,
+} from "../internal/driver/storageopts"
 import { parseZip, extractZipEntry, ZipArchive } from "../internal/archive/zip"
-import { assertSafeUrl } from "../pkg/http"
+import { assertSafeUrl, getTrustedHosts } from "../pkg/http"
 import { seedRouter } from "./seed"
+
+/**
+ * 该路径所属存储是否禁止目录列表（对齐 Go handles.FsList 的 DisableIndex 判断）。
+ * 存储无法解析时返回 false，避免误伤虚拟目录。
+ */
+async function isStorageIndexDisabled(reqPath: string): Promise<boolean> {
+  try {
+    const resolved = await resolvePath(reqPath)
+    if (!resolved?.storage) return false
+    return getDisableIndex(resolved.storage)
+  } catch {
+    return false
+  }
+}
 import {
   clampChunkSize,
   deleteSession,
@@ -49,6 +77,7 @@ const getStorageRequestContext = (c: any) => {
     }
     return {
       waitUntil: (promise: Promise<unknown>) => executionCtx.waitUntil(promise),
+      env: c.env, // 传递 env 用于请求级 KV 缓存复用
     }
   } catch {
     return undefined
@@ -64,20 +93,20 @@ const permissionDenied = (c: any) =>
 
 // ---- 上传大小限制（M-5：防止超大请求体被整体读入内存导致 Worker OOM）----
 // 单次整体上传（/put /form）与分片单片（/upload/part）分开设限，
-// 均可通过环境变量 MAX_UPLOAD_SIZE / MAX_PART_SIZE 覆盖。
-const DEFAULT_MAX_UPLOAD_SIZE = 25 * 1024 * 1024 // 25MB
-const DEFAULT_MAX_PART_SIZE = 16 * 1024 * 1024 // 16MB
+// 均可通过环境变量 MAX_UPLOAD / MAX_UPPART 覆盖。
+const DEFAULT_MAX_UPLOAD = 25 * 1024 * 1024 // 25MB
+const DEFAULT_MAX_UPPART = 16 * 1024 * 1024 // 16MB
 
 function getUploadSizeLimit(c: any, part: boolean): number {
   const env = c.env || {}
-  const key = part ? "MAX_PART_SIZE" : "MAX_UPLOAD_SIZE"
+  const key = part ? "MAX_UPPART" : "MAX_UPLOAD"
   const raw =
     env[key] || (typeof process !== "undefined" ? process.env?.[key] : "")
   if (raw) {
     const n = parseInt(String(raw), 10)
     if (Number.isFinite(n) && n > 0) return n
   }
-  return part ? DEFAULT_MAX_PART_SIZE : DEFAULT_MAX_UPLOAD_SIZE
+  return part ? DEFAULT_MAX_UPPART : DEFAULT_MAX_UPLOAD
 }
 
 /** 返回超限时的上限字节数；未超限或无法判断（无 Content-Length）返回 null */
@@ -134,12 +163,7 @@ fsRouter.post("/dirs", async (c) => {
               const segs = String(f).split("/").filter(Boolean)
               dirs.push({
                 name: segs[segs.length - 1] || f,
-                size: 0,
-                is_dir: true,
                 modified: item.modified || new Date().toISOString(),
-                sign: "",
-                thumb: "",
-                type: 1,
               })
             }
           } catch {
@@ -153,12 +177,7 @@ fsRouter.post("/dirs", async (c) => {
         .filter((item: any) => item.is_dir)
         .map((item: any) => ({
           name: item.name,
-          size: 0,
-          is_dir: true,
           modified: item.modified || new Date().toISOString(),
-          sign: item.sign || "",
-          thumb: item.thumb || "",
-          type: 1,
         }))
       return c.json({ code: 200, message: "success", data: dirs })
     }
@@ -168,12 +187,7 @@ fsRouter.post("/dirs", async (c) => {
       .filter((item: any) => item.is_dir)
       .map((item: any) => ({
         name: item.name,
-        size: 0,
-        is_dir: true,
         modified: item.modified || new Date().toISOString(),
-        sign: item.sign || "",
-        thumb: item.thumb || "",
-        type: 1,
       }))
     return c.json({ code: 200, message: "success", data: dirs })
   } catch (err: any) {
@@ -305,13 +319,31 @@ fsRouter.post("/list", async (c) => {
       })
     }
 
+    // 普通路径：应用 meta 权限（密码 + read_users + readme/header + hide 过滤）
+    const meta = await getNearestMeta(reqPath, c.env)
+    if (!canAccess(user, meta, reqPath, body.password || "")) {
+      return c.json(
+        { code: 403, message: "Access denied (wrong password or not in read_users)", data: null },
+        403,
+      )
+    }
+
+    // disable_index（对齐 Go handles.FsList）：该存储禁止目录列表时，
+    // 即使有读权限也不返回内容，避免分享单文件后被逐级浏览整个存储。
+    if (await isStorageIndexDisabled(reqPath)) {
+      return c.json(
+        { code: 403, message: "Index is disabled for this storage", data: null },
+        403,
+      )
+    }
+
     const { content, provider, storage } = await listItems(
       reqPath,
       requestContext,
     )
-    // write 按请求者身份如实返回：游客/无写权限用户为 false，
-    // 前端据此隐藏上传、新建文件夹等写操作入口
-    const writable = canWrite(user)
+    // write：用户写权限 + meta.write_users 白名单（对齐 Go common.CanWrite）
+    const writable = canWrite(user) && canWriteMeta(user, meta, reqPath)
+    const writeContentBypass = canWriteContentBypassUserPerms(meta, reqPath)
     // 下载签名（对齐 Go server/common.Sign + handles.isEncrypt）：
     //   目录不签名；sign_all（或 TS 扩展的 link_expiration）开启、
     //   或该目录被设了密码的 meta 覆盖时，为文件项签发 HMAC 签名。
@@ -326,23 +358,31 @@ fsRouter.post("/list", async (c) => {
       : 0
     // Normalize each item to the full Obj shape expected by the frontend
     const normalized = await Promise.all(
-      content.map(async (item: any) => {
-        const fullPath = `${reqPath}/${item.name}`.replace(/\/{2,}/g, "/")
-        const sign =
-          !item.is_dir && signNeeded
-            ? await signDownloadPath(c, fullPath, signExpiresIn)
-            : ""
-        return {
-          name: item.name,
-          size: item.size,
-          is_dir: item.is_dir,
-          created: item.created || item.modified || new Date().toISOString(),
-          modified: item.modified || new Date().toISOString(),
-          sign,
-          thumb: item.thumb || "",
-          type: item.type ?? 0,
-        }
-      }),
+      content
+        .filter((item: any) => !isHidden(meta, reqPath, item.name))
+        .map(async (item: any) => {
+          const fullPath = `${reqPath}/${item.name}`.replace(/\/{2,}/g, "/")
+          const sign =
+            !item.is_dir && signNeeded
+              ? await signDownloadPath(c, fullPath, signExpiresIn)
+              : ""
+          // hashinfo / hash_info：从驱动透传哈希信息（Go ObjResp 字段）
+          // 驱动不支持时为空字符串/空对象，保持与 Go 响应结构兼容
+          const hashInfoStr: string = (item as any).hashinfo || (item as any).hash_info_str || ""
+          const hashInfo: Record<string, string> = (item as any).hash_info || {}
+          return {
+            name: item.name,
+            size: item.size,
+            is_dir: item.is_dir,
+            created: item.created || item.modified || new Date().toISOString(),
+            modified: item.modified || new Date().toISOString(),
+            sign,
+            thumb: item.thumb || "",
+            type: item.type ?? 0,
+            hashinfo: hashInfoStr,
+            hash_info: hashInfo,
+          }
+        }),
     )
 
     let storagePageSize = 0
@@ -375,19 +415,45 @@ fsRouter.post("/list", async (c) => {
       }
     }
 
+    // direct_upload_tools：从 storage 透传支持的直传工具列表（对齐 Go FsListResp）
+    // storage 不支持时为空数组，保持与 Go 响应结构兼容
+    const directUploadTools: string[] = (() => {
+      if (!storage) return []
+      const tools: string[] = []
+      const driver = (storage as any)
+      // S3 系列驱动支持 s3_presigned 直传
+      if (/^(s3|minio|cos|oss|r2|b2|cloudflare_r2)/i.test(driver.driver || "")) {
+        tools.push("s3_presigned")
+      }
+      // 驱动自声明的 direct_upload_tools 字段（驱动扩展点）
+      if (Array.isArray(driver.direct_upload_tools)) {
+        for (const t of driver.direct_upload_tools) {
+          if (!tools.includes(t)) tools.push(t)
+        }
+      }
+      return tools
+    })()
+
     const { content: pagedContent, total } = paginateStorageItems(normalized)
+    // cache_expiration：由 custom_cache_policies 按路径覆盖后得出（分钟）。
+    // 对齐 Go 的路径级缓存策略；前端/上层可据此决定该目录的列表缓存时长。
+    const cacheExpiration = storage
+      ? resolveCacheExpiration(storage, reqPath)
+      : undefined
     return c.json({
       code: 200,
       message: "success",
       data: {
         content: pagedContent,
         total,
-        readme: "",
-        header: "",
+        readme: getReadme(meta, reqPath),
+        header: getHeader(meta, reqPath),
         write: writable,
-        write_content_bypass: false,
+        write_content_bypass: writeContentBypass,
         provider,
+        direct_upload_tools: directUploadTools,
         page_size: effectivePerPage > 0 ? effectivePerPage : undefined,
+        cache_expiration: cacheExpiration,
       },
     })
   } catch (err: any) {
@@ -468,6 +534,15 @@ fsRouter.post("/get", async (c) => {
       })
     }
 
+    // 普通路径：应用 meta 权限（密码 + read_users + readme/header）
+    const meta = await getNearestMeta(reqPath, c.env)
+    if (!canAccess(user, meta, reqPath, body.password || "")) {
+      return c.json(
+        { code: 403, message: "Access denied (wrong password or not in read_users)", data: null },
+        403,
+      )
+    }
+
     const { item, provider, rawUrl } = await getItem(reqPath, requestContext)
     // 与 /fs/list 同源逻辑，见上方注释
     const signPolicy = await getSignPolicy(c)
@@ -480,6 +555,45 @@ fsRouter.post("/get", async (c) => {
             signPolicy.expiresIn || (await getSignExpiresIn(c)),
           )
         : ""
+    const writable = canWrite(user) && canWriteMeta(user, meta, reqPath)
+    const writeContentBypass = canWriteContentBypassUserPerms(meta, reqPath)
+
+    // Related：查找同目录中文件名前缀相同的文件（字幕 .srt/.ass/.vtt、NFO 等）
+    // 对齐 Go server/handles/fsread.go getRelated 逻辑：
+    //   stem = 去掉最后一个扩展名的文件名；related = 同目录中 stem 相同的其他文件
+    let related: any[] = []
+    if (!item.is_dir) {
+      try {
+        const parentPath = reqPath.includes("/")
+          ? reqPath.slice(0, reqPath.lastIndexOf("/")) || "/"
+          : "/"
+        const stem = item.name.includes(".")
+          ? item.name.slice(0, item.name.lastIndexOf("."))
+          : item.name
+        const { content: siblings } = await listItems(parentPath, requestContext)
+        related = siblings
+          .filter((s: any) => {
+            if (s.name === item.name || s.is_dir) return false
+            const sStem = s.name.includes(".")
+              ? s.name.slice(0, s.name.lastIndexOf("."))
+              : s.name
+            return sStem === stem
+          })
+          .map((s: any) => ({
+            name: s.name,
+            size: s.size,
+            is_dir: false,
+            modified: s.modified || new Date().toISOString(),
+            sign: "",
+            thumb: (s as any).thumb || "",
+            type: s.type ?? 0,
+          }))
+      } catch {
+        // 获取关联文件失败不影响主文件响应
+        related = []
+      }
+    }
+
     return c.json({
       code: 200,
       message: "success",
@@ -494,12 +608,12 @@ fsRouter.post("/get", async (c) => {
         thumb: (item as any).thumb || "",
         type: item.type ?? 0,
         raw_url: rawUrl,
-        readme: "",
-        header: "",
+        readme: getReadme(meta, reqPath),
+        header: getHeader(meta, reqPath),
         provider,
-        related: [],
-        write: canWrite(user),
-        write_content_bypass: false,
+        related,
+        write: writable,
+        write_content_bypass: writeContentBypass,
       },
     })
   } catch (err: any) {
@@ -1462,12 +1576,29 @@ fsRouter.get("/multipart/status", async (c) => {
 })
 
 // ---- 归档（Archive）----
-// 仅支持 ZIP（Store/Deflate，Worker 内置 DecompressionStream）；
-// rar/7z/tar 等格式明确返回「不支持」。归档内容在内存中解析，
-// 受 Worker 内存限制，适合中小型归档。
+// ZIP（Store/Deflate）：Worker 内置 DecompressionStream，完整支持。
+// tar/tar.gz/tgz/tar.bz2/tar.xz：需要对应解压实现，当前运行时若无
+//   原生支持则返回 501（能力不足，非请求错误），前端可据此提示用户。
+// 7z/rar：Worker 运行时无原生解析库，明确返回 501。
+// 归档内容在内存中解析，受 Worker 内存限制，适合中小型归档。
 
-function isSupportedArchive(name: string): boolean {
-  return /\.zip$/i.test(name)
+type ArchiveFormat = "zip" | "tar" | "tar.gz" | "tar.bz2" | "tar.xz" | "7z" | "rar"
+
+function detectArchiveFormat(name: string): ArchiveFormat | null {
+  const lower = name.toLowerCase()
+  if (lower.endsWith(".zip")) return "zip"
+  if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) return "tar.gz"
+  if (lower.endsWith(".tar.bz2") || lower.endsWith(".tbz2")) return "tar.bz2"
+  if (lower.endsWith(".tar.xz") || lower.endsWith(".txz")) return "tar.xz"
+  if (lower.endsWith(".tar")) return "tar"
+  if (lower.endsWith(".7z")) return "7z"
+  if (lower.endsWith(".rar")) return "rar"
+  return null
+}
+
+/** 当前运行时实际可解析的格式（ZIP 始终可用；其他格式按需扩展） */
+function isNativelySupported(fmt: ArchiveFormat): boolean {
+  return fmt === "zip"
 }
 
 /** 下载归档文件字节（复用驱动 get() 的 raw_url + SSRF 防护） */
@@ -1494,7 +1625,10 @@ async function fetchArchiveBytes(
   if (!item || !item.raw_url) {
     throw new Error("archive driver did not return download link")
   }
-  assertSafeUrl(item.raw_url, "Archive download")
+  // 管理员配置的受信存储 endpoint host（内网自建 S3/WebDAV/MinIO）+ 全局
+  // 环境变量 SSRF_ALLOWED_HOSTS 加入白名单
+  const trustedHosts = getTrustedHosts(resolved.storage?.addition, c.env)
+  assertSafeUrl(item.raw_url, "Archive download", trustedHosts)
   const resp = await fetch(item.raw_url, {
     headers: item.raw_url_headers || {},
   })
@@ -1568,8 +1702,16 @@ fsRouter.post("/archive/meta", async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const path = String(body.path || c.req.query("path") || "").trim()
   if (!path) return c.json({ code: 400, message: "path is required", data: null }, 400)
-  if (!isSupportedArchive(path)) {
-    return c.json({ code: 400, message: "unsupported archive format (only ZIP is supported)", data: null }, 400)
+  const fmt = detectArchiveFormat(path)
+  if (!fmt) {
+    return c.json({ code: 400, message: "unrecognized archive format", data: null }, 400)
+  }
+  if (!isNativelySupported(fmt)) {
+    return c.json({
+      code: 501,
+      message: `archive format '${fmt}' is recognized but not supported in this runtime (Worker supports ZIP only); use the Go backend for ${fmt} archives`,
+      data: null,
+    }, 501)
   }
   try {
     const bytes = await fetchArchiveBytes(c, user, path)
@@ -1598,8 +1740,16 @@ fsRouter.post("/archive/list", async (c) => {
   const path = String(body.path || c.req.query("path") || "").trim()
   const innerPath = String(body.inner_path || "").trim().replace(/\/+/g, "/")
   if (!path) return c.json({ code: 400, message: "path is required", data: null }, 400)
-  if (!isSupportedArchive(path)) {
-    return c.json({ code: 400, message: "unsupported archive format (only ZIP is supported)", data: null }, 400)
+  const fmtList = detectArchiveFormat(path)
+  if (!fmtList) {
+    return c.json({ code: 400, message: "unrecognized archive format", data: null }, 400)
+  }
+  if (!isNativelySupported(fmtList)) {
+    return c.json({
+      code: 501,
+      message: `archive format '${fmtList}' is recognized but not supported in this runtime; use the Go backend for ${fmtList} archives`,
+      data: null,
+    }, 501)
   }
   try {
     const bytes = await fetchArchiveBytes(c, user, path)
@@ -1652,7 +1802,8 @@ fsRouter.post("/archive/decompress", async (c) => {
     let count = 0
     for (const name of names) {
       const srcPath = srcDir ? `${srcDir}/${name}` : `/${name}`
-      if (!isSupportedArchive(name)) {
+      const fmtDecomp = detectArchiveFormat(name)
+      if (!fmtDecomp || !isNativelySupported(fmtDecomp)) {
         return c.json({ code: 400, message: `unsupported archive format: ${name} (only ZIP is supported)`, data: null }, 400)
       }
       const bytes = await fetchArchiveBytes(c, user, srcPath)

@@ -37,15 +37,15 @@
 
 | EdgeOne Makers · Международный | EdgeOne Makers · Китай | Cloudflare Workers · Глобальный |
 | :---: | :---: | :---: |
-| [![Развернуть на EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Развернуть на EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
+| [![Развернуть на EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Развернуть на EdgeOne](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
 
 </div>
 
 > [!IMPORTANT]
 > - Если Cloudflare отображает `не удаётся получить содержимое репозитория`, сначала [сделайте fork](https://github.com/OpenListTeam/OpenList-Worker/fork) этого проекта, а затем разверните, подключившись к репозиторию Github
 > - После развёртывания настройте переменные окружения: **EdgeOne**: [Международная консоль](https://console.edgeone.ai/makers) · [Консоль Китая](https://console.cloud.tencent.com/edgeone/makers); **Cloudflare**: [Панель Worker](https://dash.cloudflare.com/). Переменные окружения:
->   - `DB_DRIVER`: режим хранения данных: `json` (по умолчанию) / `d1` (Cloudflare) / `kv` / `mysql`
->   - `DB_JSON_BACKEND`: бэкенд, используемый форматом `json`: `blob` (по умолчанию) / `kv` / `cf_rest`
+>   - `DB_FORMAT`: формат хранения данных: `map` (по умолчанию, JSON всего объекта) / `key` (хранение по ключу) / `sql` (реляционные таблицы, совместимо с бэкендом Go)
+>   - `DB_DRIVER`: драйвер базы данных: `auto` (по умолчанию, автоопределение) / `blob` / `cfkv` / `kv` / `d1` / `mysql`
 >   - Остальные необязательные переменные см. в **подробном руководстве по развёртыванию**: [Cloudflare](https://doc.oplist.org/guide/installation/worker#deploy-to-cloudflare-workers) · [EdgeOne](https://doc.oplist.org/guide/installation/worker#deploy-to-edgeone) · [ESA](https://doc.oplist.org/guide/installation/worker#deploy-to-alibaba-cloud-esa)
 
 

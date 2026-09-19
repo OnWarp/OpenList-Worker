@@ -37,15 +37,15 @@
 
 | EdgeOne Makers · 国际站 | EdgeOne Makers · 中国站 | Cloudflare Workers · 全球站 |
 | :---: | :---: | :---: |
-| [![使用 EdgeOne 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![使用 EdgeOne 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=ENCRYPTION_SECRET,JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
+| [![使用 EdgeOne 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://edgeone.ai/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![使用 EdgeOne 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/pages/new?project-name=openlist-tsworker&repository-url=https://github.com/OpenListTeam/OpenList-Worker&install-command=pnpm%20install%20--no-frozen-lockfile&build-command=pnpm%20run%20build&output-directory=dist&env=JWT_SECRET) | [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OpenListTeam/OpenList-Worker) |
 
 </div>
 
 > [!IMPORTANT]
 > - 若Cloudflare提示`无法获取存储库内容`，则您需要先[Fork](https://github.com/OpenListTeam/OpenList-Worker/fork)本项目，再通过连接到Github仓库功能部署
 > - 部署完成后配置环境变量： **EdgeOne**：[国际站](https://console.edgeone.ai/makers) · [中国站](https://console.cloud.tencent.com/edgeone/makers)；**Cloudflare**：[Worker 后台](https://dash.cloudflare.com/)，环境变量：
->   - `DB_DRIVER`: 数据保存方式：`json` (默认) / `d1` (Cloudflare) / `kv` / `mysql`
->   - `DB_JSON_BACKEND`: 选择`json`格式所使用的后端: `blob` (默认) / `kv` / `cf_rest`
+>   - `DB_FORMAT`: 数据存储格式：`map` (默认，整对象JSON) / `key` (分key存储) / `sql` (关系表，与Go后端一致)
+>   - `DB_DRIVER`: 数据库驱动：`auto` (默认，自动检测) / `blob` (EdgeOne Blob) / `cfkv` (CF KV API) / `kv` (KV binding) / `d1` (Cloudflare D1) / `mysql`
 >   - 其余可选变量参考**详细部署指南**：[Cloudflare](https://doc.oplist.org/guide/installation/worker#deploy-to-cloudflare-workers) · [EdgeOne](https://doc.oplist.org/guide/installation/worker#deploy-to-edgeone) · [ESA](https://doc.oplist.org/guide/installation/worker#deploy-to-alibaba-cloud-esa)
 
 
@@ -107,7 +107,7 @@ OpenList-Worker 是官方 [OpenListTeam/OpenList](https://github.com/OpenListTea
 # 1. 安装依赖
 pnpm install
 
-# 2. 配置 wrangler.toml（填写 JWT_SECRET、KV/D1 绑定）
+# 2. 编辑 wrangler.jsonc / .env，配置 JWT_SECRET 与存储（KV/D1 在控制台绑定）
 
 # 3. 启动开发服务器（自动拉取官方前端并运行 Worker）
 pnpm run dev:unified
@@ -144,6 +144,92 @@ pnpm run deploy:worker
 - **框架**：React 19 + TypeScript
 - **UI 库**：Ant Design / Material-UI
 - **构建工具**：Vite
+
+---
+
+
+## 配置
+
+### 环境变量
+
+#### 数据库配置
+
+**DB_FORMAT**（数据存储格式）
+- `map`（默认）：整对象 JSON 格式，适用于 KV/Blob 等简单存储
+- `key`：分 key 存储格式，每个实体一条记录（如 `users_1`），避免大 JSON
+- `sql`：关系数据库表格式，与 Go 后端完全一致，适用于 D1/MySQL
+
+**DB_DRIVER**（数据库驱动）
+- `auto`（默认）：自动检测可用驱动（优先级：mysql → d1 → kv → cfkv → blob → do）
+- `blob`：EdgeOne Blob Storage（SDK）/ ESA Blob（binding）
+- `cfkv`：Cloudflare KV REST API（需配置 `CF_ACCOUNT`、`CF_KV_UUID`、`CF_API_KEY`）
+- `kv`：KV 存储（binding 名固定为 `KV`；EdgeOne Node 云函数自动走 HTTP 代理模式）
+- `d1`：Cloudflare D1（SQLite）
+- `do`：Cloudflare Durable Objects（SQLite）
+- `mysql`：MySQL（仅 Node.js 容器）
+
+**推荐配置组合：**
+```bash
+# Cloudflare Workers + D1（推荐）
+DB_FORMAT=sql        # 也可用 map / key
+DB_DRIVER=d1         # 需在 wrangler.jsonc 的 d1_databases 里绑定名为 DB
+
+# EdgeOne + Blob（推荐，零配置）
+DB_FORMAT=map        # 或 key
+DB_DRIVER=blob
+
+# Cloudflare Workers + KV（必须先绑定 KV，见下方【方案 A】）
+DB_FORMAT=map        # 或 key
+DB_DRIVER=kv         # 需打开 wrangler.jsonc 的 kv_namespaces，绑定名必须恰好是 KV；
+                     # 未绑定却显式写 kv 会直接报错（不做回退）
+
+# EdgeOne Node 云函数 + KV（还需额外部署 Edge Function 代理）
+DB_FORMAT=map        # 或 key
+DB_DRIVER=kv
+EO_KV_URLS=https://<你的部署域名>   # 代理地址（也可由请求 origin 自动注入）
+JWT_SECRET=<32 字符以上>           # 代理鉴权，需与 Edge Function 侧一致
+
+# 远程访问 Cloudflare KV（HTTP API，无需 binding）
+DB_FORMAT=key
+DB_DRIVER=cfkv
+CF_ACCOUNT=your_account_id
+CF_KV_UUID=your_namespace_id
+CF_API_KEY=your_api_token
+```
+
+> 不确定用哪个就保持 `DB_DRIVER=auto`（默认，自动探测）。
+> 显式指定驱动时**不做回退**：该驱动不可用会直接拒绝请求并给出可操作原因（含
+> 「自动探测会选哪个驱动」，照抄即可），`/api/public/env_check` 与
+> `/api/public/init_status` 也会显示同样的原因和一行修复建议，
+> 避免「以为在用 KV、实际写进了别的后端」。
+> 非法「驱动 × 格式」组合（如 `DB_FORMAT=sql` + `DB_DRIVER=kv`）同样只报错，
+> 不会自动改驱动或格式。
+
+**向后兼容：**
+- `DB_DRIVER=json` 自动转换为 `DB_FORMAT=map` + 自动检测驱动
+
+**表名对齐（仅 SQL 格式）：**
+`sql` 格式采用列式表，命名策略与 Go 后端的 GORM 一致（snake_case + 复数表名 + 前缀）：
+
+| Go 结构体     | 表名                |
+| :------------ | :------------------ |
+| `SettingItem` | `x_setting_items`   |
+| `SharingDB`   | `x_sharing_dbs`     |
+| `Storage`     | `x_storages`        |
+| `User`        | `x_users`           |
+| `Meta`        | `x_metas`           |
+| （仅 TS）     | `x_plugins`         |
+
+前缀固定为 `x_`（与 Go 后端默认值一致）。要与 Go 后端共享同一物理数据库，无需额外配置。
+
+#### 安全配置
+
+- `JWT_SECRET`：JWT 令牌签名密钥（必填），**同时用于数据加密与定时任务鉴权**
+- `ADMIN_PASS`：初始管理员密码（可选，设置后跳过安装向导自动初始化 admin）
+
+#### 其他配置
+
+详细配置说明请参考 [官方文档](https://doc.oplist.org/guide/configuration)
 
 ---
 
